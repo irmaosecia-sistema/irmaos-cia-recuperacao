@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Recuperar senha | Irmãos & Cia</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 20px; font-family: Arial, sans-serif; background: #edf3fa; color: #17314d; }
+    main { width: 100%; max-width: 420px; background: white; padding: 30px; border-radius: 14px; box-shadow: 0 8px 28px #16345520; }
+    h1 { margin: 0 0 8px; font-size: 25px; }
+    p { line-height: 1.5; }
+    label { display: block; margin: 16px 0 6px; font-weight: bold; }
+    input { width: 100%; padding: 12px; font-size: 16px; border: 1px solid #a8b7c8; border-radius: 7px; }
+    button { margin-top: 20px; width: 100%; padding: 13px; border: 0; border-radius: 7px; background: #135a94; color: white; font-weight: bold; font-size: 16px; cursor: pointer; }
+    button:disabled { opacity: .6; cursor: wait; }
+    #mensagem { margin-top: 16px; white-space: pre-wrap; }
+    .erro { color: #9a2525; } .sucesso { color: #146b3b; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Irmãos &amp; Cia</h1>
+  <p>Recuperação de senha do sistema</p>
+  <p id="mensagem" role="status">Verificando seu link de recuperação...</p>
+  <form id="formulario" hidden>
+    <label for="senha">Nova senha</label>
+    <input id="senha" type="password" minlength="12" autocomplete="new-password" required>
+    <label for="confirmacao">Confirme a nova senha</label>
+    <input id="confirmacao" type="password" minlength="12" autocomplete="new-password" required>
+    <button id="botao" type="submit">Salvar nova senha</button>
+  </form>
+</main>
+<script>
+'use strict';
+const SUPABASE_URL = 'https://igboyetnfyjbwukfxcbp.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_ypOOj0PHOpBassnj0FtqeA_OyV1j888';
+const mensagem = document.getElementById('mensagem');
+const formulario = document.getElementById('formulario');
+const botao = document.getElementById('botao');
+function informar(texto, tipo = '') {
+  mensagem.textContent = texto;
+  mensagem.className = tipo;
+}
+async function requisitar(caminho, metodo, corpo, token) {
+  const headers = { apikey: SUPABASE_KEY, 'Content-Type': 'application/json' };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  const resposta = await fetch(SUPABASE_URL + caminho, {
+    method: metodo, headers, body: corpo ? JSON.stringify(corpo) : undefined,
+    cache: 'no-store'
+  });
+  const dados = await resposta.json().catch(() => ({}));
+  if (!resposta.ok) throw new Error(dados.msg || dados.error_description || dados.message || 'Solicitação não autorizada.');
+  return dados;
+}
+let tokenRecuperacao = null;
+async function iniciar() {
+  if (!SUPABASE_KEY.startsWith('sb_publishable_')) {
+    informar('Configure a chave publicável do Supabase no arquivo index.html.', 'erro');
+    return;
+  }
+  const hash = new URLSearchParams(location.hash.slice(1));
+  const query = new URLSearchParams(location.search);
+  // Remove tokens da barra de endereço e do histórico visível imediatamente.
+  history.replaceState(null, '', location.pathname);
+  try {
+    if (hash.get('error') || query.get('error')) {
+      throw new Error(hash.get('error_description') || query.get('error_description') || 'Link inválido ou expirado.');
+    }
+    if (hash.get('type') === 'recovery' && hash.get('access_token')) {
+      tokenRecuperacao = hash.get('access_token');
+    } else if (query.get('token_hash') && query.get('type') === 'recovery') {
+      const sessao = await requisitar('/auth/v1/verify', 'POST', {
+        token_hash: query.get('token_hash'), type: 'recovery'
+      });
+      tokenRecuperacao = sessao.access_token;
+    } else {
+      throw new Error('Abra esta página pelo link de recuperação enviado ao seu e-mail.');
+    }
+    if (!tokenRecuperacao) throw new Error('Não foi possível validar o link de recuperação.');
+    informar('Link validado. Escolha uma nova senha com pelo menos 12 caracteres.');
+    formulario.hidden = false;
+  } catch (erro) {
+    informar(erro.message + '\nSolicite um novo e-mail de recuperação no Supabase.', 'erro');
+  }
+}
+formulario.addEventListener('submit', async (evento) => {
+  evento.preventDefault();
+  const senha = document.getElementById('senha').value;
+  const confirmacao = document.getElementById('confirmacao').value;
+  if (senha.length < 12) return informar('Use pelo menos 12 caracteres.', 'erro');
+  if (senha !== confirmacao) return informar('As senhas não coincidem.', 'erro');
+  botao.disabled = true;
+  informar('Atualizando sua senha...');
+  try {
+    await requisitar('/auth/v1/user', 'PUT', { password: senha }, tokenRecuperacao);
+    tokenRecuperacao = null;
+    formulario.reset();
+    formulario.hidden = true;
+    informar('Senha alterada com sucesso! Você já pode entrar no sistema com a nova senha.', 'sucesso');
+  } catch (erro) {
+    informar('Não foi possível alterar a senha: ' + erro.message, 'erro');
+  } finally {
+    botao.disabled = false;
+  }
+});
+iniciar();
+</script>
+</body>
+</html>
